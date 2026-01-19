@@ -22,6 +22,7 @@ from shellspark.aggregations import (
     first_,
     last_,
 )
+from shellspark.optimizer import QueryOptimizer
 
 __version__ = "0.1.0"
 __all__ = [
@@ -44,4 +45,6 @@ __all__ = [
     "max_",
     "first_",
     "last_",
+    # Optimizer
+    "QueryOptimizer",
 ]

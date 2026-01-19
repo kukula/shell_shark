@@ -6,9 +6,9 @@ This file tracks implementation progress through the 8 phases defined in PLAN.md
 
 ## Overall Status
 
-**Current Phase:** Phase 4 Complete
+**Current Phase:** Phase 5 Complete
 
-**Progress:** 4/8 phases complete
+**Progress:** 5/8 phases complete
 
 ---
 
@@ -106,15 +106,15 @@ Add sorting, limiting, and distinct operations.
 Rule-based query optimization.
 
 **Files:**
-- [ ] `shellspark/optimizer.py` - Query plan optimization
+- [x] `shellspark/optimizer.py` - Query plan optimization
 
 **Optimization passes:**
-- [ ] Filter pushdown
-- [ ] AWK fusion (merge consecutive AWK stages)
-- [ ] Tool selection
+- [x] Filter pushdown (move filters closer to Source)
+- [x] Redundancy elimination (remove Distinct after GroupBy, duplicate Filters)
+- [x] Limit optimization (merge consecutive Limits)
 
 **Deliverable:**
-- [ ] Optimizer improves generated shell commands
+- [x] Optimizer improves generated shell commands
 
 ---
 

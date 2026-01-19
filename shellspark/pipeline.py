@@ -21,6 +21,7 @@ from shellspark.codegen.awk import AWKGenerator
 from shellspark.codegen.grep import GrepGenerator
 from shellspark.codegen.sort import SortGenerator
 from shellspark.executor import ExecutionResult, execute, stream_execute
+from shellspark.optimizer import QueryOptimizer
 
 
 class Pipeline:
@@ -311,7 +312,10 @@ class Pipeline:
         Raises:
             ValueError: If the pipeline cannot be compiled.
         """
-        return self._generate_command(self._root)
+        # Apply optimization
+        optimizer = QueryOptimizer()
+        optimized_root = optimizer.optimize(self._root)
+        return self._generate_command(optimized_root)
 
     def _generate_command(self, node: Node) -> str:
         """Generate shell command for the pipeline."""
