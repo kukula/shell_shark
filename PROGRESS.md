@@ -6,9 +6,9 @@ This file tracks implementation progress through the 8 phases defined in PLAN.md
 
 ## Overall Status
 
-**Current Phase:** Phase 1 Complete
+**Current Phase:** Phase 2 Complete
 
-**Progress:** 1/8 phases complete
+**Progress:** 2/8 phases complete
 
 ---
 
@@ -36,17 +36,22 @@ Create end-to-end pipeline that filters text files.
 Support column-based operations with AWK.
 
 **Files:**
-- [ ] `shellspark/codegen/awk.py` - AWK code generation
-- [ ] `shellspark/formats/__init__.py` - Formats package
-- [ ] `shellspark/formats/csv.py` - CSV format handler
-- [ ] `shellspark/formats/text.py` - Text format handler
+- [x] `shellspark/codegen/awk.py` - AWK code generation
+- [x] `shellspark/formats/__init__.py` - Formats package
+- [x] `shellspark/formats/base.py` - Format handler base class
+- [x] `shellspark/formats/csv.py` - CSV format handler
+- [x] `shellspark/formats/text.py` - Text format handler
 
 **New AST nodes:**
-- [ ] `Select` node
-- [ ] `Parse` node
+- [x] `Select` node (already existed in ast.py)
+- [x] `Parse` node (already existed in ast.py)
+
+**Pipeline methods:**
+- [x] `parse()` method
+- [x] `select()` method
 
 **Deliverable:**
-- [ ] Column selection and CSV parsing working with AWK
+- [x] Column selection and CSV parsing working with AWK
 
 ---
 
