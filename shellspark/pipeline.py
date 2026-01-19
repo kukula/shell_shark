@@ -19,6 +19,7 @@ from shellspark.ast import (
 )
 from shellspark.codegen.awk import AWKGenerator
 from shellspark.codegen.grep import GrepGenerator
+from shellspark.codegen.jq import JQGenerator
 from shellspark.codegen.sort import SortGenerator
 from shellspark.executor import ExecutionResult, execute, stream_execute
 from shellspark.optimizer import QueryOptimizer
@@ -302,6 +303,13 @@ class Pipeline:
                 return True
         return False
 
+    def _is_json_pipeline(self, node: Node) -> bool:
+        """Check if pipeline processes JSON data."""
+        for n in walk_tree(node):
+            if isinstance(n, Parse) and n.format == "json":
+                return True
+        return False
+
     def to_shell(self) -> str:
         """
         Compile the pipeline to a shell command string.
@@ -322,6 +330,12 @@ class Pipeline:
         # Handle Sort, Limit, Distinct at the top level
         if isinstance(node, (Sort, Limit, Distinct)):
             return self._generate_sort_limit_distinct(node)
+
+        # Check for JSON first (higher priority)
+        if self._is_json_pipeline(node):
+            generator = JQGenerator()
+            if generator.can_handle(node):
+                return generator.generate(node)
 
         # Check if we need AWK (column-level operations)
         if self._needs_awk():
@@ -352,6 +366,12 @@ class Pipeline:
 
         if isinstance(node, (Sort, Limit, Distinct)):
             return self._generate_sort_limit_distinct(node)
+
+        # Check for JSON first (higher priority)
+        if self._is_json_pipeline(node):
+            generator = JQGenerator()
+            if generator.can_handle(node):
+                return generator.generate(node)
 
         # Check if child needs AWK
         needs_awk = False

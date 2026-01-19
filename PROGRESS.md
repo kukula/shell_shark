@@ -6,9 +6,9 @@ This file tracks implementation progress through the 8 phases defined in PLAN.md
 
 ## Overall Status
 
-**Current Phase:** Phase 5 Complete
+**Current Phase:** Phase 6 Complete
 
-**Progress:** 5/8 phases complete
+**Progress:** 6/8 phases complete
 
 ---
 
@@ -122,11 +122,10 @@ Rule-based query optimization.
 Add JSON processing with jq.
 
 **Files:**
-- [ ] `shellspark/codegen/jq.py` - jq code generation
-- [ ] `shellspark/formats/json.py` - JSON format handler
+- [x] `shellspark/codegen/jq.py` - jq code generation
 
 **Deliverable:**
-- [ ] JSON filtering and selection via jq
+- [x] JSON filtering and selection via jq
 
 ---
 

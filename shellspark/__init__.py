@@ -23,6 +23,7 @@ from shellspark.aggregations import (
     last_,
 )
 from shellspark.optimizer import QueryOptimizer
+from shellspark.codegen.jq import JQGenerator
 
 __version__ = "0.1.0"
 __all__ = [
@@ -47,4 +48,6 @@ __all__ = [
     "last_",
     # Optimizer
     "QueryOptimizer",
+    # Code generators
+    "JQGenerator",
 ]
