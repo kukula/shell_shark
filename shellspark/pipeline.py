@@ -53,7 +53,15 @@ def _set_cached_command(key: tuple, cmd: str) -> None:
 
 
 def clear_command_cache() -> None:
-    """Clear the command cache."""
+    """Clear the command cache.
+
+    Use this after changing tool configuration or to free memory.
+    The cache stores compiled shell commands keyed by AST hash and tool paths.
+
+    Example:
+        >>> from shellspark import clear_command_cache
+        >>> clear_command_cache()
+    """
     _command_cache.clear()
 
 

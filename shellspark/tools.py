@@ -257,7 +257,15 @@ def grep_supports_pcre() -> bool:
 
 
 def clear_tool_cache() -> None:
-    """Clear all cached tool detection results."""
+    """Clear all cached tool detection results.
+
+    Use this after installing new tools or changing environment variables
+    (SHELLSPARK_AWK, SHELLSPARK_GREP, etc.) to re-detect available tools.
+
+    Example:
+        >>> from shellspark.tools import clear_tool_cache
+        >>> clear_tool_cache()
+    """
     get_platform.cache_clear()
     get_cpu_count.cache_clear()
     detect_awk.cache_clear()

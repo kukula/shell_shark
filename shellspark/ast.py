@@ -6,7 +6,18 @@ from typing import Any, Optional, Union
 
 
 class AggFunc(Enum):
-    """Supported aggregation functions."""
+    """Supported aggregation functions.
+
+    Attributes:
+        COUNT: Count rows or non-null values.
+        SUM: Sum of numeric values.
+        AVG: Average (mean) of numeric values.
+        MIN: Minimum value.
+        MAX: Maximum value.
+        FIRST: First value in group.
+        LAST: Last value in group.
+        COUNTDISTINCT: Count of unique values.
+    """
 
     COUNT = auto()
     SUM = auto()
@@ -19,14 +30,32 @@ class AggFunc(Enum):
 
 
 class SortOrder(Enum):
-    """Sort order."""
+    """Sort order for sort operations.
+
+    Attributes:
+        ASC: Ascending order (smallest to largest).
+        DESC: Descending order (largest to smallest).
+    """
 
     ASC = auto()
     DESC = auto()
 
 
 class FilterOp(Enum):
-    """Filter comparison operators."""
+    """Filter comparison operators.
+
+    Attributes:
+        EQ: Equality (==).
+        NE: Not equal (!=).
+        LT: Less than (<).
+        LE: Less than or equal (<=).
+        GT: Greater than (>).
+        GE: Greater than or equal (>=).
+        CONTAINS: Substring match.
+        REGEX: Regular expression match.
+        STARTSWITH: String prefix match.
+        ENDSWITH: String suffix match.
+    """
 
     EQ = auto()  # ==
     NE = auto()  # !=

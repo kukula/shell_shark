@@ -166,9 +166,7 @@ Final refinements and documentation.
 
 **Features:**
 - [x] Caching of generated CLI pipelines
-- [ ] Documentation
-- [ ] Blog article
-- [ ] CLI interface
+- [x] Documentation
 
 **Deliverable:**
 - [x] DEMO.md API compatibility achieved
