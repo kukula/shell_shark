@@ -217,6 +217,21 @@ def detect_jq() -> Optional[ToolInfo]:
     return None
 
 
+def get_parallel_workers(requested: Optional[int] = None) -> int:
+    """Get number of parallel workers to use.
+
+    Args:
+        requested: Specific number of workers requested by user.
+                   None means auto-detect based on CPU count.
+
+    Returns:
+        Number of workers to use (minimum 1).
+    """
+    if requested is not None:
+        return max(1, requested)
+    return get_cpu_count()
+
+
 @lru_cache(maxsize=1)
 def grep_supports_pcre() -> bool:
     """Check if grep supports PCRE (-P flag)."""

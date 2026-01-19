@@ -6,9 +6,9 @@ This file tracks implementation progress through the 8 phases defined in PLAN.md
 
 ## Overall Status
 
-**Current Phase:** Phase 6 Complete
+**Current Phase:** Phase 7 Complete
 
-**Progress:** 6/8 phases complete
+**Progress:** 7/8 phases complete
 
 ---
 
@@ -132,13 +132,19 @@ Add JSON processing with jq.
 ### Phase 7: Parallelization
 Multi-file processing with parallel execution.
 
+**Files:**
+- [x] `shellspark/ast.py` - Added `Parallel` node
+- [x] `shellspark/tools.py` - Added `get_parallel_workers()` helper
+- [x] `shellspark/pipeline.py` - Added `parallel()` method and command generation
+
 **Features:**
-- [ ] `find | xargs -P` pattern for multi-file processing
-- [ ] Safe filename handling with `-print0`/`-0`
-- [ ] Configurable worker count
+- [x] `find | xargs -P` pattern for multi-file processing
+- [x] Safe filename handling with `-print0`/`-0`
+- [x] Configurable worker count (defaults to CPU count)
+- [x] Validation to prevent parallelization of global operations (sort, distinct, group_by, limit)
 
 **Deliverable:**
-- [ ] `Pipeline("logs/*.log").parallel(workers=4)` generates parallel xargs
+- [x] `Pipeline("logs/*.log").parallel(workers=4)` generates parallel xargs
 
 ---
 

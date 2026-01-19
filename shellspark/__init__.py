@@ -12,6 +12,7 @@ from shellspark.ast import (
     Limit,
     Distinct,
     Parse,
+    Parallel,
 )
 from shellspark.aggregations import (
     count_,
@@ -38,6 +39,7 @@ __all__ = [
     "Limit",
     "Distinct",
     "Parse",
+    "Parallel",
     # Aggregation helpers
     "count_",
     "sum_",

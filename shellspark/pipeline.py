@@ -2,6 +2,9 @@
 
 from typing import Iterator, Optional, Union
 
+import os
+import shlex
+
 from shellspark.ast import (
     Aggregation,
     Distinct,
@@ -10,11 +13,13 @@ from shellspark.ast import (
     GroupBy,
     Limit,
     Node,
+    Parallel,
     Parse,
     Select,
     Sort,
     SortOrder,
     Source,
+    get_source,
     walk_tree,
 )
 from shellspark.codegen.awk import AWKGenerator
@@ -290,6 +295,62 @@ class Pipeline:
         self._root = Distinct(child=self._root, columns=cols)
         return self
 
+    def parallel(self, workers: Optional[int] = None) -> "Pipeline":
+        """
+        Enable parallel processing for glob patterns.
+
+        Processes files matching the glob pattern in parallel using
+        find | xargs -P. This is useful for processing multiple files
+        like "logs/*.log" across multiple CPU cores.
+
+        Args:
+            workers: Number of parallel workers. Default is CPU count.
+
+        Returns:
+            Self for method chaining.
+
+        Raises:
+            ValueError: If the pipeline contains operations that cannot
+                       be parallelized (sort, distinct, group_by/agg).
+
+        Example:
+            >>> Pipeline("logs/*.log").filter(line__contains="ERROR").parallel(workers=4).to_shell()
+            'find logs -name '*.log' -print0 | xargs -0 -P4 grep -F 'ERROR''
+        """
+        # Validate that we don't have operations that require global state
+        self._validate_parallel_operations(self._root)
+
+        self._root = Parallel(child=self._root, workers=workers)
+        return self
+
+    def _validate_parallel_operations(self, node: Node) -> None:
+        """Validate that the pipeline can be parallelized.
+
+        Operations that require global state across all files cannot
+        be parallelized: sort, distinct, group_by/agg.
+        """
+        for n in walk_tree(node):
+            if isinstance(n, Sort):
+                raise ValueError(
+                    "Cannot parallelize pipeline with sort(). "
+                    "Sort requires all data to be collected first."
+                )
+            if isinstance(n, Distinct):
+                raise ValueError(
+                    "Cannot parallelize pipeline with distinct(). "
+                    "Distinct requires all data to be collected first."
+                )
+            if isinstance(n, GroupBy):
+                raise ValueError(
+                    "Cannot parallelize pipeline with group_by()/agg(). "
+                    "Aggregations require all data to be collected first."
+                )
+            if isinstance(n, Limit):
+                raise ValueError(
+                    "Cannot parallelize pipeline with limit(). "
+                    "Limit requires all data to be collected first."
+                )
+
     def _needs_awk(self) -> bool:
         """Check if the pipeline requires AWK (has column-level operations)."""
         for node in walk_tree(self._root):
@@ -327,6 +388,10 @@ class Pipeline:
 
     def _generate_command(self, node: Node) -> str:
         """Generate shell command for the pipeline."""
+        # Handle Parallel at top level
+        if isinstance(node, Parallel):
+            return self._generate_parallel(node)
+
         # Handle Sort, Limit, Distinct at the top level
         if isinstance(node, (Sort, Limit, Distinct)):
             return self._generate_sort_limit_distinct(node)
@@ -345,6 +410,154 @@ class Pipeline:
 
         # Fall back to node-by-node generation for simple pipelines
         return self._generate_command_recursive(node)
+
+    def _parse_glob_pattern(self, pattern: str) -> tuple:
+        """Parse a glob pattern into directory and filename pattern.
+
+        Args:
+            pattern: A glob pattern like 'logs/*.log' or 'data/**/*.csv'.
+
+        Returns:
+            Tuple of (directory, filename_pattern).
+
+        Examples:
+            >>> _parse_glob_pattern('logs/*.log')
+            ('logs', '*.log')
+            >>> _parse_glob_pattern('*.txt')
+            ('.', '*.txt')
+        """
+        directory = os.path.dirname(pattern) or "."
+        filename = os.path.basename(pattern)
+        return directory, filename
+
+    def _generate_parallel(self, node: Parallel) -> str:
+        """Generate find | xargs -P command for parallel execution.
+
+        Args:
+            node: Parallel AST node.
+
+        Returns:
+            Shell command using find | xargs for parallel processing.
+        """
+        from shellspark.tools import get_parallel_workers
+
+        # Get source and parse pattern
+        source = get_source(node)
+        if source is None:
+            raise ValueError("Parallel pipeline must have a Source node")
+
+        directory, filename_pattern = self._parse_glob_pattern(source.path)
+
+        # Get worker count
+        workers = get_parallel_workers(node.workers)
+
+        # Generate inner command (without the source file - xargs provides it)
+        inner_cmd = self._generate_inner_command(node.child)
+
+        # Build find | xargs command
+        # -print0 and -0 handle filenames with spaces/special chars
+        find_cmd = f"find {shlex.quote(directory)} -name {shlex.quote(filename_pattern)} -print0"
+        xargs_cmd = f"xargs -0 -P{workers} {inner_cmd}"
+
+        return f"{find_cmd} | {xargs_cmd}"
+
+    def _generate_inner_command(self, node: Node) -> str:
+        """Generate command for use with xargs (no source file in command).
+
+        The generated command expects the file path to be provided by xargs
+        as the last argument.
+
+        Args:
+            node: AST node to generate command for.
+
+        Returns:
+            Shell command without source file path.
+        """
+        # Check for JSON first (higher priority)
+        if self._is_json_pipeline(node):
+            generator = JQGenerator()
+            if generator.can_handle(node):
+                # Get the full command and strip the source file
+                full_cmd = generator.generate(node)
+                return self._strip_source_from_command(full_cmd, node)
+
+        # Check if we need AWK (column-level operations)
+        needs_awk = False
+        for n in walk_tree(node):
+            if isinstance(n, Parse):
+                needs_awk = True
+                break
+            if isinstance(n, Select):
+                needs_awk = True
+                break
+            if isinstance(n, Filter) and n.column is not None:
+                needs_awk = True
+                break
+
+        if needs_awk:
+            generator = AWKGenerator()
+            if generator.can_handle(node):
+                full_cmd = generator.generate(node)
+                return self._strip_source_from_command(full_cmd, node)
+
+        # Fall back to grep-style generation
+        return self._generate_inner_recursive(node)
+
+    def _strip_source_from_command(self, cmd: str, node: Node) -> str:
+        """Strip the source file path from a command.
+
+        Commands like 'awk ... file.txt' become 'awk ...' so xargs can
+        append the filename.
+
+        Args:
+            cmd: Full command with source file.
+            node: AST node to find Source.
+
+        Returns:
+            Command without source file path.
+        """
+        source = get_source(node)
+        if source is None:
+            return cmd
+
+        # The source path is typically at the end of the command
+        quoted_path = shlex.quote(source.path)
+
+        # Try to remove quoted path from end
+        if cmd.endswith(quoted_path):
+            return cmd[: -len(quoted_path)].rstrip()
+
+        # Try unquoted path (simple paths without special chars)
+        if cmd.endswith(source.path):
+            return cmd[: -len(source.path)].rstrip()
+
+        # If command ends with '<' for input redirection
+        if f"< {quoted_path}" in cmd:
+            return cmd.replace(f"< {quoted_path}", "").rstrip()
+
+        return cmd
+
+    def _generate_inner_recursive(self, node: Node) -> str:
+        """Generate shell command for xargs, handling filters recursively.
+
+        Args:
+            node: AST node to generate command for.
+
+        Returns:
+            Shell command for use with xargs.
+        """
+        if isinstance(node, Source):
+            return ""
+
+        if isinstance(node, Filter):
+            # For filters, we use GrepGenerator but without the file
+            generator = GrepGenerator()
+            if generator.can_handle(node):
+                # Generate with a placeholder and strip it
+                full_cmd = generator.generate(node)
+                return self._strip_source_from_command(full_cmd, node)
+
+        raise ValueError(f"Cannot generate inner code for node type: {type(node).__name__}")
 
     def _generate_sort_limit_distinct(self, node: Node) -> str:
         """Generate command for Sort, Limit, or Distinct with child command."""

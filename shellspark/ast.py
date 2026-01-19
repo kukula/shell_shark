@@ -137,6 +137,22 @@ class Join(Node):
     how: str = "inner"  # inner, left, right
 
 
+@dataclass(frozen=True)
+class Parallel(Node):
+    """Parallel execution wrapper for multi-file processing.
+
+    Wraps a pipeline to execute it in parallel across multiple files
+    matching a glob pattern using find | xargs -P.
+
+    Attributes:
+        child: The child pipeline to execute in parallel.
+        workers: Number of parallel workers. None means auto (CPU count).
+    """
+
+    child: Node
+    workers: Optional[int] = None  # None = auto (CPU count)
+
+
 def walk_tree(node: Node):
     """Generator that yields all nodes in the tree (depth-first)."""
     yield node
