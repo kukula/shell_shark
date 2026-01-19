@@ -4,17 +4,22 @@ from typing import Iterator, Optional, Union
 
 from shellspark.ast import (
     Aggregation,
+    Distinct,
     Filter,
     FilterOp,
     GroupBy,
+    Limit,
     Node,
     Parse,
     Select,
+    Sort,
+    SortOrder,
     Source,
     walk_tree,
 )
 from shellspark.codegen.awk import AWKGenerator
 from shellspark.codegen.grep import GrepGenerator
+from shellspark.codegen.sort import SortGenerator
 from shellspark.executor import ExecutionResult, execute, stream_execute
 
 
@@ -213,6 +218,76 @@ class Pipeline:
 
         return self
 
+    def sort(
+        self, column: Union[str, int], order: SortOrder = SortOrder.ASC, numeric: bool = False
+    ) -> "Pipeline":
+        """
+        Sort by a column.
+
+        Args:
+            column: Column name (str) or 1-based index (int) to sort by.
+            order: Sort order (SortOrder.ASC or SortOrder.DESC). Default is ASC.
+            numeric: If True, sort numerically. Default is False (lexicographic).
+
+        Returns:
+            Self for method chaining.
+
+        Example:
+            >>> Pipeline("data.csv").parse("csv").sort("age", numeric=True)
+            >>> Pipeline("data.csv").parse("csv").sort("name", order=SortOrder.DESC)
+        """
+        col_str = str(column)
+        self._root = Sort(
+            child=self._root,
+            columns=((col_str, order),),
+            numeric=numeric,
+        )
+        return self
+
+    def limit(self, count: int, offset: int = 0) -> "Pipeline":
+        """
+        Limit output to a number of rows.
+
+        Args:
+            count: Maximum number of rows to return. Must be >= 1.
+            offset: Number of rows to skip before returning. Default is 0.
+
+        Returns:
+            Self for method chaining.
+
+        Raises:
+            ValueError: If count < 1 or offset < 0.
+
+        Example:
+            >>> Pipeline("data.csv").limit(10)  # First 10 rows
+            >>> Pipeline("data.csv").limit(10, offset=5)  # Skip 5, take 10
+        """
+        if count < 1:
+            raise ValueError("limit count must be >= 1")
+        if offset < 0:
+            raise ValueError("offset must be >= 0")
+        self._root = Limit(child=self._root, count=count, offset=offset)
+        return self
+
+    def distinct(self, *columns: Union[str, int]) -> "Pipeline":
+        """
+        Remove duplicate rows.
+
+        Args:
+            *columns: Optional column names or indices to consider for uniqueness.
+                     If not specified, all columns are compared.
+
+        Returns:
+            Self for method chaining.
+
+        Example:
+            >>> Pipeline("data.csv").distinct()  # Unique rows
+            >>> Pipeline("data.csv").distinct("name")  # Unique by name column
+        """
+        cols = tuple(str(c) for c in columns) if columns else None
+        self._root = Distinct(child=self._root, columns=cols)
+        return self
+
     def _needs_awk(self) -> bool:
         """Check if the pipeline requires AWK (has column-level operations)."""
         for node in walk_tree(self._root):
@@ -240,6 +315,10 @@ class Pipeline:
 
     def _generate_command(self, node: Node) -> str:
         """Generate shell command for the pipeline."""
+        # Handle Sort, Limit, Distinct at the top level
+        if isinstance(node, (Sort, Limit, Distinct)):
+            return self._generate_sort_limit_distinct(node)
+
         # Check if we need AWK (column-level operations)
         if self._needs_awk():
             generator = AWKGenerator()
@@ -247,6 +326,51 @@ class Pipeline:
                 return generator.generate(node)
 
         # Fall back to node-by-node generation for simple pipelines
+        return self._generate_command_recursive(node)
+
+    def _generate_sort_limit_distinct(self, node: Node) -> str:
+        """Generate command for Sort, Limit, or Distinct with child command."""
+        sort_generator = SortGenerator()
+
+        # Generate child command first
+        child_cmd = self._generate_child_command(node.child)
+
+        # Generate sort/limit/distinct command
+        if child_cmd:
+            return sort_generator.generate(node, input_cmd=child_cmd)
+        else:
+            return sort_generator.generate(node)
+
+    def _generate_child_command(self, node: Node) -> str:
+        """Generate command for a child node (used by sort/limit/distinct)."""
+        if isinstance(node, Source):
+            return ""
+
+        if isinstance(node, (Sort, Limit, Distinct)):
+            return self._generate_sort_limit_distinct(node)
+
+        # Check if child needs AWK
+        needs_awk = False
+        for n in walk_tree(node):
+            if isinstance(n, Parse):
+                needs_awk = True
+                break
+            if isinstance(n, Select):
+                needs_awk = True
+                break
+            if isinstance(n, GroupBy):
+                needs_awk = True
+                break
+            if isinstance(n, Filter) and n.column is not None:
+                needs_awk = True
+                break
+
+        if needs_awk:
+            generator = AWKGenerator()
+            if generator.can_handle(node):
+                return generator.generate(node)
+
+        # Fall back to recursive generation
         return self._generate_command_recursive(node)
 
     def _generate_command_recursive(self, node: Node) -> str:

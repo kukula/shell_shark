@@ -6,9 +6,9 @@ This file tracks implementation progress through the 8 phases defined in PLAN.md
 
 ## Overall Status
 
-**Current Phase:** Phase 3 Complete
+**Current Phase:** Phase 4 Complete
 
-**Progress:** 3/8 phases complete
+**Progress:** 4/8 phases complete
 
 ---
 
@@ -81,19 +81,24 @@ Support grouping and aggregation.
 Add sorting, limiting, and distinct operations.
 
 **Files:**
-- [ ] `shellspark/codegen/sort.py` - Sort, uniq, head, tail generation
+- [x] `shellspark/codegen/sort.py` - Sort, uniq, head, tail generation
 
 **New AST nodes:**
-- [ ] `Sort` node
-- [ ] `Limit` node
-- [ ] `Distinct` node
+- [x] `Sort` node (existed in ast.py)
+- [x] `Limit` node (existed in ast.py)
+- [x] `Distinct` node (existed in ast.py)
+
+**Pipeline methods:**
+- [x] `sort()` method
+- [x] `limit()` method
+- [x] `distinct()` method
 
 **Cross-platform:**
-- [ ] Detect GNU sort's `--parallel` flag
-- [ ] Handle `nproc` (Linux) vs `sysctl -n hw.ncpu` (macOS)
+- [x] Detect GNU sort's `--parallel` flag (existed in tools.py)
+- [x] Handle `nproc` (Linux) vs `sysctl -n hw.ncpu` (macOS) (existed in tools.py)
 
 **Deliverable:**
-- [ ] Sorting and limiting work on both macOS and Linux
+- [x] Sorting and limiting work on both macOS and Linux
 
 ---
 
