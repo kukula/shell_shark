@@ -22,6 +22,8 @@ from shellspark.aggregations import (
     max_,
     first_,
     last_,
+    countdistinct_,
+    mean_,
 )
 from shellspark.optimizer import QueryOptimizer
 from shellspark.codegen.jq import JQGenerator
@@ -48,6 +50,8 @@ __all__ = [
     "max_",
     "first_",
     "last_",
+    "countdistinct_",
+    "mean_",
     # Optimizer
     "QueryOptimizer",
     # Code generators

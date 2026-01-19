@@ -15,6 +15,7 @@ class AggFunc(Enum):
     MAX = auto()
     FIRST = auto()
     LAST = auto()
+    COUNTDISTINCT = auto()
 
 
 class SortOrder(Enum):

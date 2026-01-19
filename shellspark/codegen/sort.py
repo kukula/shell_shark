@@ -5,6 +5,7 @@ from typing import Optional
 
 from shellspark.ast import (
     Distinct,
+    GroupBy,
     Limit,
     Node,
     Parse,
@@ -53,15 +54,18 @@ class SortGenerator(CodeGenerator):
         """Generate sort command."""
         sort_info = detect_sort()
 
-        # Find Parse and Source nodes in tree
+        # Find Parse, Source, and GroupBy nodes in tree
         parse_node: Optional[Parse] = None
         source: Optional[Source] = None
+        group_by_node: Optional[GroupBy] = None
 
         for n in walk_tree(node):
             if isinstance(n, Parse):
                 parse_node = n
             elif isinstance(n, Source):
                 source = n
+            elif isinstance(n, GroupBy):
+                group_by_node = n
 
         # Get format handler for column index resolution
         handler = None
@@ -74,16 +78,35 @@ class SortGenerator(CodeGenerator):
             )
             delimiter = parse_node.delimiter
 
+        # Build column name -> index mapping from GroupBy output
+        column_map = {}
+        if group_by_node:
+            # GroupBy output columns: keys + aggregations
+            idx = 1
+            for key in group_by_node.keys:
+                column_map[key] = idx
+                idx += 1
+            for agg in group_by_node.aggregations:
+                alias = agg.alias or agg.column or "value"
+                column_map[alias] = idx
+                idx += 1
+            # GroupBy outputs using the input delimiter (or comma by default)
+            # The AWK generator uses: output_sep = fs if fs else ","
+            if delimiter is None:
+                delimiter = ","
+
         # Build sort flags
         flags = []
 
-        # Add field separator for CSV
+        # Add field separator
         if delimiter:
             flags.append(f"-t{shlex.quote(delimiter)}")
 
         # Add sort key specifications
         for column, order in node.columns:
-            key_spec = self._build_sort_key(column, order, node.numeric, handler)
+            key_spec = self._build_sort_key(
+                column, order, node.numeric, handler, column_map
+            )
             flags.append(key_spec)
 
         # Add parallel flag for GNU sort if available
@@ -110,41 +133,31 @@ class SortGenerator(CodeGenerator):
         order: SortOrder,
         numeric: bool,
         handler,
+        column_map: Optional[dict] = None,
     ) -> str:
         """Build sort -k specification for a column."""
-        # Get column index
-        if handler and hasattr(handler, "_header") and handler._header:
-            # For CSV with headers, we need to resolve column name to index
-            # at runtime using awk, but for sort we need a static index.
-            # For now, we'll generate a key spec that assumes column name = index
-            # This requires the user to know the column index, OR we need
-            # to pre-process to determine index.
-            #
-            # Actually, the simplest approach is to require numeric column
-            # index for sort, or we use awk for dynamic column resolution.
-            # Let's try parsing as int first, then fall back to positional.
-            try:
-                col_index = int(column)
-            except ValueError:
-                # Column name - we'll need to use a workaround
-                # For simplicity, we'll rely on the column position
-                # In practice, users should use numeric indices for sort
-                # or we'd need to scan the header first
-                raise ValueError(
-                    f"Sort by column name '{column}' requires header parsing. "
-                    "Use numeric column index instead, or ensure the data "
-                    "is pre-processed with AWK."
-                )
+        col_index = None
+
+        # First, try to look up column name in the column_map (from GroupBy)
+        if column_map and column in column_map:
+            col_index = column_map[column]
         else:
             # Try to parse as integer
             try:
                 col_index = int(column)
             except ValueError:
-                # No handler with headers - can't resolve column name
-                raise ValueError(
-                    f"Cannot resolve column name '{column}' without CSV headers. "
-                    "Use numeric column index instead."
-                )
+                # Check if handler has header info
+                if handler and hasattr(handler, "_header") and handler._header:
+                    raise ValueError(
+                        f"Sort by column name '{column}' requires header parsing. "
+                        "Use numeric column index instead, or ensure the data "
+                        "is pre-processed with AWK."
+                    )
+                else:
+                    raise ValueError(
+                        f"Cannot resolve column name '{column}'. "
+                        "Use numeric column index instead."
+                    )
 
         # Build key spec: -k<start>,<end>[n][r]
         key_parts = [f"-k{col_index},{col_index}"]

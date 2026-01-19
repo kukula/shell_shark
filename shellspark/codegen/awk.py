@@ -276,6 +276,14 @@ class AWKGenerator(CodeGenerator):
             elif agg.func == AggFunc.LAST:
                 # LAST - always overwrite
                 accum_stmts.append(f"{array_name}[key]={field_ref}")
+            elif agg.func == AggFunc.COUNTDISTINCT:
+                # COUNTDISTINCT - track unique (key, value) pairs
+                # Using composite key with SUBSEP to track (group_key, column_value)
+                seen_arr = f"_cd_{self._sanitize_name(agg.alias or agg.column)}"
+                accum_stmts.append(f"{seen_arr}[key,{field_ref}]=1")
+
+        # Always track group keys for iteration (needed for COUNTDISTINCT and safer in general)
+        accum_stmts.append("_keys[key]=1")
 
         # Build main block with key assignment and accumulations
         main_block_stmts = [f"key={key_expr}"] + accum_stmts
@@ -288,13 +296,8 @@ class AWKGenerator(CodeGenerator):
         else:
             parts.append(main_block)
 
-        # Build END block
-        # Determine which array to iterate over (use first aggregation's array)
-        first_agg = group_by_node.aggregations[0]
-        if first_agg.func == AggFunc.AVG:
-            iter_array = f"_cnt_{self._sanitize_name(first_agg.alias or first_agg.column)}"
-        else:
-            iter_array = self._get_array_name(first_agg)
+        # Build END block - use _keys array for iteration
+        iter_array = "_keys"
 
         # Build output expression for each aggregation
         output_exprs = []
@@ -310,12 +313,26 @@ class AWKGenerator(CodeGenerator):
 
         output_exprs.extend(key_outputs)
 
+        # Build code to compute COUNTDISTINCT values before printing
+        countdistinct_setup = []
         for agg in group_by_node.aggregations:
             array_name = self._get_array_name(agg)
             if agg.func == AggFunc.AVG:
                 sum_arr = f"_sum_{self._sanitize_name(agg.alias or agg.column)}"
                 cnt_arr = f"_cnt_{self._sanitize_name(agg.alias or agg.column)}"
                 output_exprs.append(f"{sum_arr}[k]/{cnt_arr}[k]")
+            elif agg.func == AggFunc.COUNTDISTINCT:
+                # Need to count unique values for this group key
+                seen_arr = f"_cd_{self._sanitize_name(agg.alias or agg.column)}"
+                count_var = f"_cdc_{self._sanitize_name(agg.alias or agg.column)}"
+                # Count entries in seen_arr that match this group key
+                # The seen_arr has keys like (group_key SUBSEP value)
+                countdistinct_setup.append(f"{count_var}=0")
+                countdistinct_setup.append(
+                    f"for(_cdkey in {seen_arr}){{split(_cdkey,_cdparts,SUBSEP);"
+                    f"if(_cdparts[1]==k){count_var}++}}"
+                )
+                output_exprs.append(count_var)
             else:
                 output_exprs.append(f"{array_name}[k]")
 
@@ -331,11 +348,13 @@ class AWKGenerator(CodeGenerator):
             print_stmt = f"print {joined}"
 
         # Assemble END block
+        end_stmts = []
         if split_stmt:
-            end_body = f"for(k in {iter_array}){{{split_stmt}; {print_stmt}}}"
-        else:
-            end_body = f"for(k in {iter_array}){{{print_stmt}}}"
+            end_stmts.append(split_stmt)
+        end_stmts.extend(countdistinct_setup)
+        end_stmts.append(print_stmt)
 
+        end_body = f"for(k in {iter_array}){{{'; '.join(end_stmts)}}}"
         parts.append(f"END{{{end_body}}}")
 
         # Join all parts

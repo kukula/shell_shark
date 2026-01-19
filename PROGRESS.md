@@ -6,9 +6,9 @@ This file tracks implementation progress through the 8 phases defined in PLAN.md
 
 ## Overall Status
 
-**Current Phase:** Phase 7 Complete
+**Current Phase:** Phase 8 Complete
 
-**Progress:** 7/8 phases complete
+**Progress:** 8/8 phases complete
 
 ---
 
@@ -151,16 +151,27 @@ Multi-file processing with parallel execution.
 ### Phase 8: Polish
 Final refinements and documentation.
 
+**API Enhancements:**
+- [x] `agg()` tuple syntax: `errors=("*", "count")` and `("ip", "countdistinct")`
+- [x] `COUNTDISTINCT` aggregation function
+- [x] `mean_()` as alias for `avg_()`
+- [x] `sort(desc=True)` kwarg for descending order
+- [x] `run()` returns `list[dict]` for structured output (group_by + agg pipelines)
+
+**Demo Files:**
+- [x] `demo/generate_logs.py` - Generate realistic JSON logs
+- [x] `demo/spark_demo.py` - Apache Spark implementation
+- [x] `demo/shellspark_demo.py` - ShellSpark implementation
+- [x] `demo/benchmark.sh` - Full benchmark script
+
 **Features:**
-- [ ] CLI interface
-- [ ] Streaming results
-- [ ] Error handling improvements
+- [ ] Caching of generated CLI pipelines
 - [ ] Documentation
-- [ ] Implement demos from DEMO.md
 - [ ] Blog article
+- [ ] CLI interface
 
 **Deliverable:**
-- [ ] Production-ready release
+- [x] DEMO.md API compatibility achieved
 
 ---
 

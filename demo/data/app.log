@@ -1,0 +1,20 @@
+2024-01-15 08:00:01 INFO  [main] Application started successfully
+2024-01-15 08:00:02 DEBUG [db] Connection pool initialized with 10 connections
+2024-01-15 08:00:15 INFO  [http] Request GET /api/users completed in 45ms
+2024-01-15 08:01:23 WARN  [auth] Failed login attempt for user: admin
+2024-01-15 08:02:45 ERROR [db] Connection timeout after 30000ms
+2024-01-15 08:02:46 INFO  [db] Retrying connection...
+2024-01-15 08:02:47 INFO  [db] Connection restored
+2024-01-15 08:05:12 INFO  [http] Request POST /api/orders completed in 120ms
+2024-01-15 08:07:33 WARN  [cache] Cache miss for key: user_profile_123
+2024-01-15 08:10:01 ERROR [payment] Payment gateway returned error: insufficient_funds
+2024-01-15 08:10:02 INFO  [payment] Notifying user about payment failure
+2024-01-15 08:15:44 DEBUG [scheduler] Running scheduled task: cleanup_sessions
+2024-01-15 08:20:00 INFO  [http] Request GET /api/products completed in 32ms
+2024-01-15 08:25:18 WARN  [auth] Token expired for session: abc123
+2024-01-15 08:30:55 ERROR [validation] Invalid input: email format incorrect
+2024-01-15 08:35:22 INFO  [http] Request PUT /api/users/456 completed in 89ms
+2024-01-15 08:40:11 DEBUG [cache] Cache hit for key: product_catalog
+2024-01-15 08:45:33 INFO  [metrics] System health check passed
+2024-01-15 08:50:47 WARN  [disk] Disk usage at 85%
+2024-01-15 08:55:00 ERROR [network] DNS resolution failed for external-api.example.com

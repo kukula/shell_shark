@@ -6,6 +6,7 @@ import os
 import shlex
 
 from shellspark.ast import (
+    AggFunc,
     Aggregation,
     Distinct,
     Filter,
@@ -93,8 +94,10 @@ class Pipeline:
                 "ne": FilterOp.NE,
                 "lt": FilterOp.LT,
                 "le": FilterOp.LE,
+                "lte": FilterOp.LE,  # alias
                 "gt": FilterOp.GT,
                 "ge": FilterOp.GE,
+                "gte": FilterOp.GE,  # alias
             }
 
             if op_name not in op_mapping:
@@ -172,15 +175,20 @@ class Pipeline:
         self._pending_group_keys = tuple(columns)
         return self
 
-    def agg(self, **aggregations: Aggregation) -> "Pipeline":
+    def agg(self, **aggregations: Union[Aggregation, tuple]) -> "Pipeline":
         """
         Apply aggregations to grouped data.
 
         Must be called after group_by().
 
         Args:
-            **aggregations: Named aggregations using helper functions.
+            **aggregations: Named aggregations using helper functions or tuples.
                 Keys become output column aliases.
+                Values can be:
+                - Aggregation objects: sum_("col"), avg_("col"), count_()
+                - Tuples: ("col", "sum"), ("*", "count"), ("col", "countdistinct")
+
+        Supported tuple functions: count, sum, avg, mean, min, max, countdistinct
 
         Returns:
             Self for method chaining.
@@ -192,6 +200,12 @@ class Pipeline:
             ...     average=avg_("salary"),
             ...     headcount=count_()
             ... )
+            >>> # Or using tuple syntax:
+            >>> Pipeline("data.csv").parse("csv").group_by("dept").agg(
+            ...     total=("salary", "sum"),
+            ...     average=("salary", "avg"),
+            ...     headcount=("*", "count")
+            ... )
         """
         if self._pending_group_keys is None:
             raise ValueError("agg() must be called after group_by()")
@@ -199,18 +213,46 @@ class Pipeline:
         if not aggregations:
             raise ValueError("agg() requires at least one aggregation")
 
+        # Map string function names to AggFunc enum
+        func_mapping = {
+            "count": AggFunc.COUNT,
+            "sum": AggFunc.SUM,
+            "avg": AggFunc.AVG,
+            "mean": AggFunc.AVG,  # alias
+            "min": AggFunc.MIN,
+            "max": AggFunc.MAX,
+            "first": AggFunc.FIRST,
+            "last": AggFunc.LAST,
+            "countdistinct": AggFunc.COUNTDISTINCT,
+        }
+
         # Create Aggregation nodes with aliases
         agg_nodes = []
         for alias, agg in aggregations.items():
-            if not isinstance(agg, Aggregation):
-                raise TypeError(
-                    f"Expected Aggregation for '{alias}', got {type(agg).__name__}. "
-                    "Use helper functions like sum_(), avg_(), count_()."
+            if isinstance(agg, Aggregation):
+                # Already an Aggregation node
+                agg_with_alias = Aggregation(
+                    func=agg.func, column=agg.column, alias=alias
                 )
-            # Create new Aggregation with alias
-            agg_with_alias = Aggregation(
-                func=agg.func, column=agg.column, alias=alias
-            )
+            elif isinstance(agg, tuple) and len(agg) == 2:
+                # Tuple syntax: ("column", "func")
+                col, func_name = agg
+                func_name_lower = func_name.lower()
+                if func_name_lower not in func_mapping:
+                    raise ValueError(
+                        f"Unknown aggregation function '{func_name}'. "
+                        f"Supported: {', '.join(func_mapping.keys())}"
+                    )
+                func = func_mapping[func_name_lower]
+                # Handle "*" column (count all)
+                column = None if col == "*" else col
+                agg_with_alias = Aggregation(func=func, column=column, alias=alias)
+            else:
+                raise TypeError(
+                    f"Expected Aggregation or tuple for '{alias}', got {type(agg).__name__}. "
+                    "Use helper functions like sum_(), avg_(), count_() "
+                    "or tuples like ('column', 'sum')."
+                )
             agg_nodes.append(agg_with_alias)
 
         # Create GroupBy node
@@ -226,7 +268,11 @@ class Pipeline:
         return self
 
     def sort(
-        self, column: Union[str, int], order: SortOrder = SortOrder.ASC, numeric: bool = False
+        self,
+        column: Union[str, int],
+        order: SortOrder = SortOrder.ASC,
+        numeric: bool = False,
+        desc: bool = False,
     ) -> "Pipeline":
         """
         Sort by a column.
@@ -235,6 +281,7 @@ class Pipeline:
             column: Column name (str) or 1-based index (int) to sort by.
             order: Sort order (SortOrder.ASC or SortOrder.DESC). Default is ASC.
             numeric: If True, sort numerically. Default is False (lexicographic).
+            desc: If True, sort in descending order. Shorthand for order=SortOrder.DESC.
 
         Returns:
             Self for method chaining.
@@ -242,11 +289,14 @@ class Pipeline:
         Example:
             >>> Pipeline("data.csv").parse("csv").sort("age", numeric=True)
             >>> Pipeline("data.csv").parse("csv").sort("name", order=SortOrder.DESC)
+            >>> Pipeline("data.csv").parse("csv").sort("name", desc=True)
         """
         col_str = str(column)
+        # desc=True overrides order parameter
+        sort_order = SortOrder.DESC if desc else order
         self._root = Sort(
             child=self._root,
-            columns=((col_str, order),),
+            columns=((col_str, sort_order),),
             numeric=numeric,
         )
         return self
@@ -635,11 +685,101 @@ class Pipeline:
 
         raise ValueError(f"Cannot generate code for node type: {type(node).__name__}")
 
+    def _get_output_columns(self) -> Optional[list[str]]:
+        """Get output column names from the AST if structured output is expected."""
+        for node in walk_tree(self._root):
+            if isinstance(node, GroupBy):
+                # Column order: group keys + aggregation aliases
+                columns = list(node.keys)
+                for agg in node.aggregations:
+                    columns.append(agg.alias or agg.column or "value")
+                return columns
+        return None
+
+    def _get_output_delimiter(self) -> str:
+        """Get the output delimiter based on the pipeline structure."""
+        # AWK codegen uses the input format's delimiter for output
+        # Look for Parse node to determine delimiter
+        for node in walk_tree(self._root):
+            if isinstance(node, Parse):
+                return node.delimiter
+        # Default to tab for non-CSV/non-parsed pipelines
+        return "\t"
+
+    def _parse_structured_output(
+        self, stdout: str, columns: list[str], delimiter: str = "\t"
+    ) -> list[dict]:
+        """Parse TSV output into list of dicts."""
+        results = []
+        for line in stdout.strip().split("\n"):
+            if not line:
+                continue
+            values = line.split(delimiter)
+            row = {}
+            for i, col in enumerate(columns):
+                if i < len(values):
+                    # Try to convert numeric values
+                    val = values[i]
+                    try:
+                        # Try int first
+                        row[col] = int(val)
+                    except ValueError:
+                        try:
+                            # Then float
+                            row[col] = float(val)
+                        except ValueError:
+                            # Keep as string
+                            row[col] = val
+                else:
+                    row[col] = None
+            results.append(row)
+        return results
+
     def run(
+        self, timeout: Optional[float] = None, cwd: Optional[str] = None
+    ) -> Union[str, list[dict]]:
+        """
+        Execute the pipeline and return results.
+
+        For pipelines with structured output (e.g., group_by + agg), returns
+        a list of dicts with column names as keys. For simple pipelines,
+        returns raw stdout as a string.
+
+        Args:
+            timeout: Maximum execution time in seconds.
+            cwd: Working directory for execution.
+
+        Returns:
+            List of dicts for structured output, or raw stdout string.
+
+        Raises:
+            subprocess.TimeoutExpired: If timeout is exceeded.
+            RuntimeError: If command exits with non-zero status.
+        """
+        command = self.to_shell()
+        result = execute(command, timeout=timeout, cwd=cwd)
+
+        if result.return_code != 0:
+            # grep returns 1 when no matches found - that's not an error
+            if result.return_code == 1 and not result.stderr:
+                columns = self._get_output_columns()
+                return [] if columns else ""
+            raise RuntimeError(
+                f"Command failed with exit code {result.return_code}: {result.stderr}"
+            )
+
+        # Check if we have structured output
+        columns = self._get_output_columns()
+        if columns:
+            delimiter = self._get_output_delimiter()
+            return self._parse_structured_output(result.stdout, columns, delimiter)
+        return result.stdout
+
+    def run_raw(
         self, timeout: Optional[float] = None, cwd: Optional[str] = None
     ) -> str:
         """
-        Execute the pipeline and return stdout.
+        Execute the pipeline and return raw stdout (always as string).
 
         Args:
             timeout: Maximum execution time in seconds.

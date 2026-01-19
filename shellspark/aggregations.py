@@ -129,3 +129,37 @@ def last_(column: str) -> Aggregation:
         >>> last_("timestamp")
     """
     return Aggregation(func=AggFunc.LAST, column=column)
+
+
+def countdistinct_(column: str) -> Aggregation:
+    """
+    Create a COUNT DISTINCT aggregation.
+
+    Args:
+        column: Column to count distinct values of.
+
+    Returns:
+        Aggregation node for COUNTDISTINCT.
+
+    Example:
+        >>> countdistinct_("ip")  # Count unique IPs
+    """
+    return Aggregation(func=AggFunc.COUNTDISTINCT, column=column)
+
+
+def mean_(column: str) -> Aggregation:
+    """
+    Create a MEAN (average) aggregation.
+
+    This is an alias for avg_().
+
+    Args:
+        column: Column to average.
+
+    Returns:
+        Aggregation node for AVG.
+
+    Example:
+        >>> mean_("response_time")
+    """
+    return Aggregation(func=AggFunc.AVG, column=column)
