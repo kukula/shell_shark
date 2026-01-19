@@ -2,7 +2,17 @@
 
 from typing import Iterator, Optional, Union
 
-from shellspark.ast import Filter, FilterOp, Node, Parse, Select, Source, walk_tree
+from shellspark.ast import (
+    Aggregation,
+    Filter,
+    FilterOp,
+    GroupBy,
+    Node,
+    Parse,
+    Select,
+    Source,
+    walk_tree,
+)
 from shellspark.codegen.awk import AWKGenerator
 from shellspark.codegen.grep import GrepGenerator
 from shellspark.executor import ExecutionResult, execute, stream_execute
@@ -28,6 +38,7 @@ class Pipeline:
             format: Input format (text, csv, json). Default is text.
         """
         self._root: Node = Source(path=path, format=format)
+        self._pending_group_keys: Optional[tuple[str, ...]] = None
 
     def filter(self, **kwargs) -> "Pipeline":
         """
@@ -129,12 +140,87 @@ class Pipeline:
         self._root = Select(child=self._root, columns=tuple(columns))
         return self
 
+    def group_by(self, *columns: str) -> "Pipeline":
+        """
+        Group data by one or more columns.
+
+        Must be followed by agg() to specify aggregations.
+
+        Args:
+            *columns: Column names to group by.
+
+        Returns:
+            Self for method chaining.
+
+        Example:
+            >>> Pipeline("data.csv").parse("csv").group_by("dept").agg(cnt=count_())
+        """
+        if not columns:
+            raise ValueError("group_by() requires at least one column")
+        self._pending_group_keys = tuple(columns)
+        return self
+
+    def agg(self, **aggregations: Aggregation) -> "Pipeline":
+        """
+        Apply aggregations to grouped data.
+
+        Must be called after group_by().
+
+        Args:
+            **aggregations: Named aggregations using helper functions.
+                Keys become output column aliases.
+
+        Returns:
+            Self for method chaining.
+
+        Example:
+            >>> from shellspark import sum_, avg_, count_
+            >>> Pipeline("data.csv").parse("csv").group_by("dept").agg(
+            ...     total=sum_("salary"),
+            ...     average=avg_("salary"),
+            ...     headcount=count_()
+            ... )
+        """
+        if self._pending_group_keys is None:
+            raise ValueError("agg() must be called after group_by()")
+
+        if not aggregations:
+            raise ValueError("agg() requires at least one aggregation")
+
+        # Create Aggregation nodes with aliases
+        agg_nodes = []
+        for alias, agg in aggregations.items():
+            if not isinstance(agg, Aggregation):
+                raise TypeError(
+                    f"Expected Aggregation for '{alias}', got {type(agg).__name__}. "
+                    "Use helper functions like sum_(), avg_(), count_()."
+                )
+            # Create new Aggregation with alias
+            agg_with_alias = Aggregation(
+                func=agg.func, column=agg.column, alias=alias
+            )
+            agg_nodes.append(agg_with_alias)
+
+        # Create GroupBy node
+        self._root = GroupBy(
+            child=self._root,
+            keys=self._pending_group_keys,
+            aggregations=tuple(agg_nodes),
+        )
+
+        # Clear pending group keys
+        self._pending_group_keys = None
+
+        return self
+
     def _needs_awk(self) -> bool:
         """Check if the pipeline requires AWK (has column-level operations)."""
         for node in walk_tree(self._root):
             if isinstance(node, Parse):
                 return True
             if isinstance(node, Select):
+                return True
+            if isinstance(node, GroupBy):
                 return True
             if isinstance(node, Filter) and node.column is not None:
                 return True

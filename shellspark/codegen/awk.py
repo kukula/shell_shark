@@ -4,8 +4,11 @@ import shlex
 from typing import Optional
 
 from shellspark.ast import (
+    AggFunc,
+    Aggregation,
     Filter,
     FilterOp,
+    GroupBy,
     Node,
     Parse,
     Select,
@@ -27,12 +30,15 @@ class AWKGenerator(CodeGenerator):
         Returns True if any node requires column access:
         - Parse node (format parsing)
         - Select node (column projection)
+        - GroupBy node (aggregations)
         - Filter with column != None (column-level filter)
         """
         for n in walk_tree(node):
             if isinstance(n, Parse):
                 return True
             if isinstance(n, Select):
+                return True
+            if isinstance(n, GroupBy):
                 return True
             if isinstance(n, Filter) and n.column is not None:
                 return True
@@ -51,6 +57,7 @@ class AWKGenerator(CodeGenerator):
         parse_node: Optional[Parse] = None
         filters: list[Filter] = []
         select_node: Optional[Select] = None
+        group_by_node: Optional[GroupBy] = None
         source: Optional[Source] = None
 
         for n in walk_tree(node):
@@ -60,6 +67,8 @@ class AWKGenerator(CodeGenerator):
                 filters.append(n)
             elif isinstance(n, Select):
                 select_node = n
+            elif isinstance(n, GroupBy):
+                group_by_node = n
             elif isinstance(n, Source):
                 source = n
 
@@ -74,12 +83,18 @@ class AWKGenerator(CodeGenerator):
             # Default to text format
             handler = get_format_handler("text")
 
-        # Build AWK script parts
-        parts = []
-
-        # Add field separator flag
+        # Get field separator
         fs = handler.awk_field_separator()
         fs_flag = f"-F{shlex.quote(fs)}" if fs else ""
+
+        # Dispatch to groupby generator if present
+        if group_by_node is not None:
+            return self._generate_groupby(
+                group_by_node, filters, handler, fs, fs_flag, awk_info, source, input_cmd
+            )
+
+        # Build AWK script parts for non-groupby case
+        parts = []
 
         # Add header handling code
         header_code = handler.awk_header_code()
@@ -188,6 +203,174 @@ class AWKGenerator(CodeGenerator):
             sep_str = f'"{output_sep_escaped}"'
             joined = sep_str.join(field_refs)
             return f"print {joined}"
+
+    def _generate_groupby(
+        self,
+        group_by_node: GroupBy,
+        filters: list[Filter],
+        handler,
+        fs: Optional[str],
+        fs_flag: str,
+        awk_info,
+        source: Optional[Source],
+        input_cmd: Optional[str],
+    ) -> str:
+        """Generate AWK code for GroupBy with aggregations."""
+        parts = []
+
+        # Add header handling code
+        header_code = handler.awk_header_code()
+        if header_code:
+            parts.append(header_code)
+
+        # Build group key expression
+        key_refs = [handler.field_ref(k) for k in group_by_node.keys]
+        if len(key_refs) == 1:
+            key_expr = key_refs[0]
+        else:
+            # Use SUBSEP for composite keys
+            key_expr = "(" + " SUBSEP ".join(key_refs) + ")"
+
+        # Build filter conditions
+        conditions = []
+        for f in filters:
+            cond = self._filter_to_condition(f, handler)
+            conditions.append(cond)
+
+        # Build accumulation statements for each aggregation
+        accum_stmts = []
+        for agg in group_by_node.aggregations:
+            array_name = self._get_array_name(agg)
+            field_ref = handler.field_ref(agg.column) if agg.column else None
+
+            if agg.func == AggFunc.COUNT:
+                accum_stmts.append(f"{array_name}[key]++")
+            elif agg.func == AggFunc.SUM:
+                accum_stmts.append(f"{array_name}[key]+={field_ref}")
+            elif agg.func == AggFunc.AVG:
+                # AVG needs both sum and count
+                sum_arr = f"_sum_{self._sanitize_name(agg.alias or agg.column)}"
+                cnt_arr = f"_cnt_{self._sanitize_name(agg.alias or agg.column)}"
+                accum_stmts.append(f"{sum_arr}[key]+={field_ref}")
+                accum_stmts.append(f"{cnt_arr}[key]++")
+            elif agg.func == AggFunc.MIN:
+                # MIN with initialization check
+                seen_arr = f"_seen_{self._sanitize_name(agg.alias or agg.column)}"
+                accum_stmts.append(
+                    f"if(!{seen_arr}[key]||{field_ref}<{array_name}[key])"
+                    f"{{{array_name}[key]={field_ref};{seen_arr}[key]=1}}"
+                )
+            elif agg.func == AggFunc.MAX:
+                # MAX with initialization check
+                seen_arr = f"_seen_{self._sanitize_name(agg.alias or agg.column)}"
+                accum_stmts.append(
+                    f"if(!{seen_arr}[key]||{field_ref}>{array_name}[key])"
+                    f"{{{array_name}[key]={field_ref};{seen_arr}[key]=1}}"
+                )
+            elif agg.func == AggFunc.FIRST:
+                # FIRST - only set if not seen
+                seen_arr = f"_seen_{self._sanitize_name(agg.alias or agg.column)}"
+                accum_stmts.append(
+                    f"if(!{seen_arr}[key]){{{array_name}[key]={field_ref};{seen_arr}[key]=1}}"
+                )
+            elif agg.func == AggFunc.LAST:
+                # LAST - always overwrite
+                accum_stmts.append(f"{array_name}[key]={field_ref}")
+
+        # Build main block with key assignment and accumulations
+        main_block_stmts = [f"key={key_expr}"] + accum_stmts
+        main_block = "{" + "; ".join(main_block_stmts) + "}"
+
+        # Add condition if filters exist
+        if conditions:
+            combined_condition = " && ".join(conditions)
+            parts.append(f"{combined_condition}{main_block}")
+        else:
+            parts.append(main_block)
+
+        # Build END block
+        # Determine which array to iterate over (use first aggregation's array)
+        first_agg = group_by_node.aggregations[0]
+        if first_agg.func == AggFunc.AVG:
+            iter_array = f"_cnt_{self._sanitize_name(first_agg.alias or first_agg.column)}"
+        else:
+            iter_array = self._get_array_name(first_agg)
+
+        # Build output expression for each aggregation
+        output_exprs = []
+
+        # Handle composite key splitting in END block
+        if len(group_by_node.keys) > 1:
+            # Need to split composite key
+            split_stmt = f"split(k,_parts,SUBSEP)"
+            key_outputs = [f"_parts[{i+1}]" for i in range(len(group_by_node.keys))]
+        else:
+            split_stmt = None
+            key_outputs = ["k"]
+
+        output_exprs.extend(key_outputs)
+
+        for agg in group_by_node.aggregations:
+            array_name = self._get_array_name(agg)
+            if agg.func == AggFunc.AVG:
+                sum_arr = f"_sum_{self._sanitize_name(agg.alias or agg.column)}"
+                cnt_arr = f"_cnt_{self._sanitize_name(agg.alias or agg.column)}"
+                output_exprs.append(f"{sum_arr}[k]/{cnt_arr}[k]")
+            else:
+                output_exprs.append(f"{array_name}[k]")
+
+        # Build print statement
+        output_sep = fs if fs else ","
+        output_sep_escaped = _escape_awk_string(output_sep)
+        sep_str = f'"{output_sep_escaped}"'
+
+        if len(output_exprs) == 1:
+            print_stmt = f"print {output_exprs[0]}"
+        else:
+            joined = sep_str.join(output_exprs)
+            print_stmt = f"print {joined}"
+
+        # Assemble END block
+        if split_stmt:
+            end_body = f"for(k in {iter_array}){{{split_stmt}; {print_stmt}}}"
+        else:
+            end_body = f"for(k in {iter_array}){{{print_stmt}}}"
+
+        parts.append(f"END{{{end_body}}}")
+
+        # Join all parts
+        awk_script = " ".join(parts)
+
+        # Build full command
+        cmd_parts = [awk_info.path]
+        if fs_flag:
+            cmd_parts.append(fs_flag)
+        cmd_parts.append(shlex.quote(awk_script))
+
+        if input_cmd:
+            return f"{input_cmd} | {' '.join(cmd_parts)}"
+        elif source:
+            cmd_parts.append(shlex.quote(source.path))
+            return " ".join(cmd_parts)
+        else:
+            return " ".join(cmd_parts)
+
+    def _get_array_name(self, agg: Aggregation) -> str:
+        """Generate unique array name for an aggregation."""
+        name = self._sanitize_name(agg.alias or agg.column or "all")
+        func_prefix = agg.func.name.lower()
+        return f"_{func_prefix}_{name}"
+
+    def _sanitize_name(self, name: str) -> str:
+        """Make a name safe for use as AWK variable."""
+        # Replace non-alphanumeric chars with underscore
+        result = []
+        for c in name:
+            if c.isalnum() or c == "_":
+                result.append(c)
+            else:
+                result.append("_")
+        return "".join(result)
 
 
 def _escape_awk_string(s: str) -> str:

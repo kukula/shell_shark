@@ -6,9 +6,9 @@ This file tracks implementation progress through the 8 phases defined in PLAN.md
 
 ## Overall Status
 
-**Current Phase:** Phase 2 Complete
+**Current Phase:** Phase 3 Complete
 
-**Progress:** 2/8 phases complete
+**Progress:** 3/8 phases complete
 
 ---
 
@@ -58,15 +58,22 @@ Support column-based operations with AWK.
 ### Phase 3: Aggregations
 Support grouping and aggregation.
 
+**Files:**
+- [x] `shellspark/aggregations.py` - Aggregation helper functions (sum_, avg_, count_, etc.)
+
 **New AST nodes:**
-- [ ] `GroupBy` node
-- [ ] `Aggregation` node
+- [x] `GroupBy` node (existed in ast.py)
+- [x] `Aggregation` node (existed in ast.py)
+
+**Pipeline methods:**
+- [x] `group_by()` method
+- [x] `agg()` method
 
 **Enhancements:**
-- [ ] `codegen/awk.py` - Add associative array patterns for aggregations
+- [x] `codegen/awk.py` - Add associative array patterns for aggregations
 
 **Deliverable:**
-- [ ] `group_by().agg()` generates AWK with associative arrays
+- [x] `group_by().agg()` generates AWK with associative arrays
 
 ---
 

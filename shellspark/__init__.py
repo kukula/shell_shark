@@ -12,6 +12,15 @@ from shellspark.ast import (
     Distinct,
     Parse,
 )
+from shellspark.aggregations import (
+    count_,
+    sum_,
+    avg_,
+    min_,
+    max_,
+    first_,
+    last_,
+)
 
 __version__ = "0.1.0"
 __all__ = [
@@ -25,4 +34,12 @@ __all__ = [
     "Limit",
     "Distinct",
     "Parse",
+    # Aggregation helpers
+    "count_",
+    "sum_",
+    "avg_",
+    "min_",
+    "max_",
+    "first_",
+    "last_",
 ]
