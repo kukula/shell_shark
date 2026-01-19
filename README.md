@@ -202,6 +202,27 @@ TOOL_PREFERENCE = {
 }
 ```
 
+### Command Caching
+
+Generated shell commands are cached to avoid redundant compilation:
+
+```python
+from shellspark import Pipeline, clear_command_cache
+
+p = Pipeline("data.csv").parse("csv").filter(x__gt=5)
+
+# First call compiles the pipeline (~11ms)
+cmd1 = p.to_shell()
+
+# Second call returns cached result (~0.006ms, 1835x faster)
+cmd2 = p.to_shell()
+
+# Clear cache if needed (e.g., after tool configuration changes)
+clear_command_cache()
+```
+
+Cache key includes AST hash + tool paths, so different tool configurations produce separate cache entries.
+
 ### Handling Large Sorts
 
 For sorts that exceed memory:
@@ -228,7 +249,7 @@ sort -T /tmp --parallel=$(nproc) -S 80% -k1,1
 - **Dry-run**: Print shell command without executing
 - **Jupyter integration**: Rich output, progress bars
 - **Streaming results**: Yield rows as they come
-- **Caching**: Hash query + file mtimes, reuse results
+- **Result caching**: Cache execution results based on file mtimes
 - **Remote execution**: SSH pipeline to process files on remote servers
 - **Custom tools**: Plugin system for domain-specific parsers
 

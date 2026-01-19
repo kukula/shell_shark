@@ -4,17 +4,21 @@ Examples demonstrating ShellSpark's data transformation capabilities. ShellSpark
 
 ## Performance
 
-Tested on MacBook Air M3. Timing split into Python compilation (AST building, optimization, shell generation) and shell execution:
+Tested on MacBook Air M3, Python 3.12. Timing split into Python compilation and shell execution:
 
-| Demo | Data Size | Python | Shell | Total |
-|------|-----------|--------|-------|-------|
-| CSV Aggregation | 20 rows | 17ms | 11ms | 28ms |
-| Text Filter (contains) | 20 lines | 7ms | 11ms | 18ms |
-| Text Filter (regex) | 20 lines | 4ms | 8ms | 12ms |
-| JSON Select | 10 records | 5ms | 6ms | 11ms |
-| JSON Filter + Select | 100K records | 5ms | 279ms | 284ms |
+| Demo | Data | Compile (miss) | Compile (hit) | Shell | Speedup | AST Mem | Result Mem |
+|------|------|----------------|---------------|-------|---------|---------|------------|
+| CSV Aggregation | 20 rows | 11.4ms | 0.014ms | 10.9ms | 786x | 6.2KB | 84.1KB |
+| Text Filter (contains) | 20 lines | 10.7ms | 0.018ms | 6.0ms | 604x | 3.3KB | 83.9KB |
+| Text Filter (regex) | 20 lines | 10.0ms | 0.029ms | 6.8ms | 345x | 3.4KB | 83.7KB |
+| JSON Select | 10 records | 13.5ms | 0.009ms | 6.1ms | 1521x | 4.9KB | 83.5KB |
+| JSON Filter+Select | 100K rows | 12.7ms | 0.018ms | 270.9ms | 696x | 4.6KB | 3814KB |
 
-**Key insight:** Python compilation overhead is ~5-17ms regardless of data size. Shell execution scales with data.
+**Key insights:**
+- Compilation overhead is ~10-14ms on first call (cache miss)
+- Cached compilation returns in ~0.01-0.03ms (300-1500x faster)
+- Shell execution scales with data size; compilation does not
+- AST memory is minimal (~3-6KB); result memory scales with output size
 
 ## Quick Start
 
@@ -72,8 +76,9 @@ gawk -F, 'NR==1{for(i=1;i<=NF;i++)h[$i]=i; next} \
 ```
 
 **Timing (MacBook Air M3):**
-- Python compilation: 17ms
-- Shell execution: 11ms
+- Compile: 11.4ms (cached: 0.014ms, 786x faster)
+- Shell: 10.9ms
+- Memory: 6.2KB (AST) / 84KB (result)
 
 ---
 
@@ -95,7 +100,7 @@ errors = (
 rg -F --no-filename ERROR demo/data/app.log
 ```
 
-**Timing:** Python 7ms, Shell 11ms
+**Timing:** Compile 10.7ms (cached: 0.018ms), Shell 6.0ms, Memory 3.3KB/84KB
 
 ```python
 # Find ERROR or WARN entries using regex
@@ -111,7 +116,7 @@ issues = (
 rg --no-filename '(ERROR|WARN)' demo/data/app.log
 ```
 
-**Timing:** Python 4ms, Shell 8ms
+**Timing:** Compile 10.0ms (cached: 0.029ms), Shell 6.8ms, Memory 3.4KB/84KB
 
 ---
 
@@ -133,7 +138,7 @@ result = (
 jq -c '{name, email}' demo/data/users.json
 ```
 
-**Timing:** Python 5ms, Shell 6ms
+**Timing:** Compile 13.5ms (cached: 0.009ms), Shell 6.1ms, Memory 4.9KB/84KB
 
 ---
 
@@ -156,7 +161,7 @@ result = (
 jq -c 'select(.status >= 400) | {path, status, response_time}' demo/data/logs.json
 ```
 
-**Timing:** Python 5ms, Shell 279ms (100K records, ~18MB)
+**Timing:** Compile 12.7ms (cached: 0.018ms), Shell 271ms, Memory 4.6KB/3.8MB (100K records)
 
 ---
 
@@ -186,11 +191,13 @@ cat demo/data/book.txt | tr ' ' '\n' | grep -E '^[a-zA-Z]+$' | \
 
 ---
 
-## Caching Generated Commands
+## Command Caching
 
-The shell command can be retrieved separately with `.to_shell()` and cached:
+ShellSpark automatically caches compiled shell commands. Repeated calls to `.to_shell()` or `.run()` skip compilation:
 
 ```python
+from shellspark import Pipeline, clear_command_cache
+
 pipeline = (
     Pipeline("demo/data/sales.csv")
     .parse("csv", header=True)
@@ -198,14 +205,17 @@ pipeline = (
     .agg(total=("quantity", "sum"))
 )
 
-# Get command (5ms) - can cache this string
+# First call: ~12ms (cache miss - full compilation)
 cmd = pipeline.to_shell()
 
-# Execute later (11ms)
-result = pipeline.run()
+# Second call: ~0.01ms (cache hit - 1000x faster)
+cmd = pipeline.to_shell()
+
+# Clear cache if needed
+clear_command_cache()
 ```
 
-Tool detection (mawk/gawk/jq paths) is automatically cached via `lru_cache`.
+Cache key includes AST hash + tool paths, so different pipelines and tool configurations get separate cache entries. Tool detection (mawk/gawk/jq paths) is also cached via `lru_cache`.
 
 ## Data Files
 

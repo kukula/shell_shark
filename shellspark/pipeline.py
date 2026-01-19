@@ -5,6 +5,7 @@ from typing import Iterator, Optional, Union
 import os
 import shlex
 
+from shellspark.tools import detect_awk, detect_grep
 from shellspark.ast import (
     AggFunc,
     Aggregation,
@@ -31,6 +32,31 @@ from shellspark.executor import ExecutionResult, execute, stream_execute
 from shellspark.optimizer import QueryOptimizer
 
 
+# Module-level cache for compiled shell commands
+_command_cache: dict[tuple, str] = {}
+_CACHE_MAX_SIZE = 128
+
+
+def _get_cached_command(key: tuple) -> Optional[str]:
+    """Get cached shell command by key."""
+    return _command_cache.get(key)
+
+
+def _set_cached_command(key: tuple, cmd: str) -> None:
+    """Cache a shell command, evicting oldest entries if full."""
+    if len(_command_cache) >= _CACHE_MAX_SIZE:
+        # Simple eviction: clear oldest half
+        keys = list(_command_cache.keys())[: len(_command_cache) // 2]
+        for k in keys:
+            del _command_cache[k]
+    _command_cache[key] = cmd
+
+
+def clear_command_cache() -> None:
+    """Clear the command cache."""
+    _command_cache.clear()
+
+
 class Pipeline:
     """
     Builder class for creating data transformation pipelines.
@@ -52,6 +78,12 @@ class Pipeline:
         """
         self._root: Node = Source(path=path, format=format)
         self._pending_group_keys: Optional[tuple[str, ...]] = None
+
+    def _get_cache_key(self) -> tuple:
+        """Generate cache key from AST and tool configuration."""
+        # Include AST hash + tool info for complete key
+        # Frozen dataclasses are hashable via __hash__
+        return (hash(self._root), detect_awk().path, detect_grep().path)
 
     def filter(self, **kwargs) -> "Pipeline":
         """
@@ -423,7 +455,7 @@ class Pipeline:
 
     def to_shell(self) -> str:
         """
-        Compile the pipeline to a shell command string.
+        Compile the pipeline to a shell command string (cached).
 
         Returns:
             Shell command that implements this pipeline.
@@ -431,10 +463,21 @@ class Pipeline:
         Raises:
             ValueError: If the pipeline cannot be compiled.
         """
-        # Apply optimization
+        cache_key = self._get_cache_key()
+
+        # Check cache
+        cached = _get_cached_command(cache_key)
+        if cached is not None:
+            return cached
+
+        # Generate command
         optimizer = QueryOptimizer()
         optimized_root = optimizer.optimize(self._root)
-        return self._generate_command(optimized_root)
+        command = self._generate_command(optimized_root)
+
+        # Cache and return
+        _set_cached_command(cache_key, command)
+        return command
 
     def _generate_command(self, node: Node) -> str:
         """Generate shell command for the pipeline."""
@@ -737,20 +780,20 @@ class Pipeline:
 
     def run(
         self, timeout: Optional[float] = None, cwd: Optional[str] = None
-    ) -> Union[str, list[dict]]:
+    ) -> Union[list[str], list[dict]]:
         """
         Execute the pipeline and return results.
 
         For pipelines with structured output (e.g., group_by + agg), returns
         a list of dicts with column names as keys. For simple pipelines,
-        returns raw stdout as a string.
+        returns a list of output lines.
 
         Args:
             timeout: Maximum execution time in seconds.
             cwd: Working directory for execution.
 
         Returns:
-            List of dicts for structured output, or raw stdout string.
+            List of dicts for structured output, or list of lines for text output.
 
         Raises:
             subprocess.TimeoutExpired: If timeout is exceeded.
@@ -762,8 +805,7 @@ class Pipeline:
         if result.return_code != 0:
             # grep returns 1 when no matches found - that's not an error
             if result.return_code == 1 and not result.stderr:
-                columns = self._get_output_columns()
-                return [] if columns else ""
+                return []
             raise RuntimeError(
                 f"Command failed with exit code {result.return_code}: {result.stderr}"
             )
@@ -773,7 +815,13 @@ class Pipeline:
         if columns:
             delimiter = self._get_output_delimiter()
             return self._parse_structured_output(result.stdout, columns, delimiter)
-        return result.stdout
+
+        # Return list of lines for text output
+        lines = result.stdout.split("\n")
+        # Remove trailing empty line if present (from trailing newline)
+        if lines and lines[-1] == "":
+            lines = lines[:-1]
+        return lines
 
     def run_raw(
         self, timeout: Optional[float] = None, cwd: Optional[str] = None

@@ -1,6 +1,6 @@
 """ShellSpark - Compile declarative data transformations into Unix shell pipelines."""
 
-from shellspark.pipeline import Pipeline
+from shellspark.pipeline import Pipeline, clear_command_cache
 from shellspark.ast import (
     Source,
     Filter,
@@ -31,6 +31,7 @@ from shellspark.codegen.jq import JQGenerator
 __version__ = "0.1.0"
 __all__ = [
     "Pipeline",
+    "clear_command_cache",
     "Source",
     "Filter",
     "Select",

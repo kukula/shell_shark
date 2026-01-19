@@ -165,7 +165,7 @@ Final refinements and documentation.
 - [x] `demo/benchmark.sh` - Full benchmark script
 
 **Features:**
-- [ ] Caching of generated CLI pipelines
+- [x] Caching of generated CLI pipelines
 - [ ] Documentation
 - [ ] Blog article
 - [ ] CLI interface
