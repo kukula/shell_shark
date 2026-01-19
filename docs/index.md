@@ -8,6 +8,7 @@ ShellSpark is a Python framework that compiles declarative data transformations 
 - [Filter Operations](filter-operations.md) - Complete filter operator reference
 - [Aggregations](aggregations.md) - `group_by()` and `agg()` reference
 - [Performance](performance.md) - Optimization tips and benchmarks
+- [Cross-Platform](cross-platform.md) - macOS and Linux compatibility
 - [Troubleshooting](troubleshooting.md) - Common errors and solutions
 
 ## Overview

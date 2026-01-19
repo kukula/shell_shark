@@ -19,6 +19,19 @@ Inspired by Adam Drake's classic article [Command-line Tools can be 235x Faster 
 
 **ShellSpark's goal:** Let you write familiar, declarative transformations and compile them to optimized shell pipelines.
 
+## Features
+
+- **Familiar API** — Spark-like builder pattern with `filter()`, `select()`, `group_by()`, `agg()`, `sort()`
+- **Multiple formats** — CSV (with headers), JSON (NDJSON), and plain text
+- **Smart tool selection** — Automatically uses mawk over gawk (5-10x faster), ripgrep over grep (2-5x faster)
+- **Command caching** — Compiled pipelines cached for 600-1500x faster repeated execution
+- **Parallel processing** — Multi-file patterns with `find | xargs -P` and safe null-delimited paths
+- **Streaming execution** — Process files larger than RAM with `.stream()`
+- **Transparent compilation** — Inspect generated shell with `.to_shell()` for debugging or learning
+- **Django-style filters** — Intuitive operators: `__eq`, `__gt`, `__contains`, `__regex`
+- **Aggregations** — `count`, `sum`, `min`, `max`, `avg` with expressions like `price * quantity`
+- **Minimal dependencies** — Pure Python, uses common Unix tools (awk, grep, sort, jq)
+
 ## Usage
 
 ### Python DSL
@@ -45,16 +58,6 @@ result = (
 # See what it compiled to
 Pipeline("logs/*.json").filter(status__gte=400).to_shell()
 # => find logs -name '*.json' -print0 | xargs -0 -P8 jq -c 'select(.status >= 400)'
-```
-
-### CLI (future)
-
-```bash
-# SQL-ish syntax
-shellspark "FROM 'access.log' | PARSE apache | WHERE status >= 400 | COUNT() BY path"
-
-# Or from a file
-shellspark run query.spark
 ```
 
 ## Operation Mapping
@@ -119,38 +122,6 @@ shellspark run query.spark
 │  - Stream stdout back to Python                     │
 │  - Optional: parse results into dicts/dataframes    │
 └─────────────────────────────────────────────────────┘
-```
-
-## Project Structure
-
-```
-shellspark/
-├── shellspark/
-│   ├── __init__.py
-│   ├── pipeline.py        # Main Pipeline class, builder pattern
-│   ├── ast.py             # Operation nodes (Filter, Select, GroupBy, etc.)
-│   ├── optimizer.py       # Query plan optimization
-│   ├── codegen/
-│   │   ├── __init__.py
-│   │   ├── base.py        # Abstract code generator
-│   │   ├── awk.py         # AWK code generation
-│   │   ├── grep.py        # grep/ripgrep generation
-│   │   ├── jq.py          # jq for JSON
-│   │   └── sort.py        # sort, uniq, head, tail
-│   ├── tools.py           # Tool detection (is mawk installed?)
-│   ├── executor.py        # Run pipelines, stream results
-│   └── formats/
-│       ├── __init__.py
-│       ├── csv.py
-│       ├── json.py
-│       └── text.py
-├── tests/
-├── examples/
-│   ├── chess_analysis.py  # Reproduce the 235x benchmark
-│   ├── log_analysis.py
-│   └── csv_etl.py
-├── pyproject.toml
-└── README.md
 ```
 
 ## Implementation Notes
@@ -237,21 +208,12 @@ sort -T /tmp --parallel=$(nproc) -S 80% -k1,1
 
 ### Edge Cases to Handle
 
-1. **Field delimiters in data** — CSV with quoted fields needs proper parsing (use `mlr` or Python csv module as fallback)
-2. **Header detection** — Option to skip first line or use headers as field names
-3. **Empty results** — Don't fail, return empty
-4. **Special characters** — Proper escaping via `shlex.quote()`
-5. **Binary files** — Detect and skip or error
-
-## Future Ideas
-
-- **Explain mode**: Show query plan and estimated cost
-- **Dry-run**: Print shell command without executing
-- **Jupyter integration**: Rich output, progress bars
-- **Streaming results**: Yield rows as they come
-- **Result caching**: Cache execution results based on file mtimes
-- **Remote execution**: SSH pipeline to process files on remote servers
-- **Custom tools**: Plugin system for domain-specific parsers
+1. Check on Linux
+2. **Field delimiters in data** — CSV with quoted fields needs proper parsing (use `mlr` or Python csv module as fallback)
+3. **Header detection** — Option to skip first line or use headers as field names
+4. **Empty results** — Don't fail, return empty
+5. **Special characters** — Proper escaping via `shlex.quote()`
+6. **Binary files** — Detect and skip or error
 
 ## Prior Art & Inspiration
 
@@ -260,9 +222,7 @@ sort -T /tmp --parallel=$(nproc) -S 80% -k1,1
 - [xsv](https://github.com/BurntSushi/xsv) — Fast CSV toolkit in Rust
 - [q](http://harelba.github.io/q/) — Run SQL on CSV files
 - [textql](https://github.com/dinedal/textql) — SQL against CSV
-- [pandas](https://pandas.pydata.org/) — API inspiration (but in-memory)
 - [Spark](https://spark.apache.org/) — API inspiration (but distributed)
-- [DuckDB](https://duckdb.org/) — Fast analytical queries (different approach, embedded DB)
 
 ## License
 
